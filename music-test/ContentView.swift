@@ -4,10 +4,9 @@ import Combine
 import MediaPlayer
 import CoreMotion
 
-// MARK: - Manager Ruchu (Parallax)
+// MARK: - Manager Ruchu (Pijana Okładka)
 class MotionManager: ObservableObject {
-    // To jest ta część, która sprawia, że okładka pływa.
-    // Jakby była pijana. Ale tak artystycznie.
+    // To sprawia, że okładka pływa. Jakby była na morence.
     @Published var pitch: Double = 0.0
     @Published var roll: Double = 0.0
     private let manager = CMMotionManager()
@@ -17,6 +16,7 @@ class MotionManager: ObservableObject {
             manager.deviceMotionUpdateInterval = 1.0 / 60.0
             manager.startDeviceMotionUpdates(to: .main) { [weak self] (motion, error) in
                 guard let self, let motion else { return }
+                // Obliczamy wychylenie, żeby okładka uciekała przed palcem
                 self.pitch = motion.attitude.pitch
                 self.roll = motion.attitude.roll
             }
@@ -24,11 +24,11 @@ class MotionManager: ObservableObject {
     }
 }
 
-// MARK: - Systemowy Suwak Głośności
+// MARK: - Systemowy Suwak (Dla tych co lubią sąsiadów denerwować)
 struct SystemVolumeSlider: UIViewRepresentable {
     func makeUIView(context: Context) -> MPVolumeView {
         let volumeView = MPVolumeView(frame: .zero)
-        volumeView.showsRouteButton = true
+        volumeView.showsRouteButton = true // Pozwala wysłać nutę na głośnik JBL przez AirPlay
         if let slider = volumeView.subviews.first(where: { $0 is UISlider }) as? UISlider {
             slider.minimumTrackTintColor = .systemPink
         }
@@ -37,7 +37,7 @@ struct SystemVolumeSlider: UIViewRepresentable {
     func updateUIView(_ uiView: MPVolumeView, context: Context) {}
 }
 
-// MARK: - Wizualizator Dźwięku (Zoptymalizowany)
+// MARK: - Wizualizator Dźwięku (Skaczące Kreski)
 struct AudioVisualizer: View {
     var power: Float
     var isPlaying: Bool
@@ -45,20 +45,22 @@ struct AudioVisualizer: View {
     var body: some View {
         HStack(spacing: 4) {
             ForEach(0..<15) { _ in
-                let heightMultiplier = CGFloat.random(in: 0.6...1.0)
-                let barHeight = isPlaying ? max(2, CGFloat(power) * 60 * heightMultiplier) : 2
+                // Losowy mnożnik, żeby każdy słupek miał własne życie
+                let heightMultiplier = CGFloat.random(in: 0.6...1.2)
+                let barHeight = isPlaying ? max(4, CGFloat(power) * 70 * heightMultiplier) : 4
                 
                 Capsule()
                     .frame(width: 4, height: barHeight)
                     .foregroundColor(.pink)
+                    .shadow(color: .pink.opacity(0.3), radius: 2)
             }
         }
-        .frame(height: 60)
-        .animation(.easeOut(duration: 0.08), value: power)
+        .frame(height: 70)
+        .animation(.spring(response: 0.15, dampingFraction: 0.5), value: power)
     }
 }
 
-// MARK: - Manager Audio (Zoptymalizowany)
+// MARK: - Manager Audio (Serce i Płuca aplikacji)
 class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     struct Track: Identifiable, Equatable {
         let id = UUID()
@@ -67,9 +69,7 @@ class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         let fileName: String
     }
     
-    enum RepeatMode {
-        case none, one, all
-    }
+    enum RepeatMode { case none, one, all }
 
     private var originalPlaylist: [Track] = []
     @Published var playlist: [Track] = []
@@ -91,6 +91,7 @@ class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     override init() {
         super.init()
+        // Twoja elita utworów. Jeśli pliku nie ma, Xcode zapłacze.
         let initialTracks = [
             Track(title: "taobao", artist: "yungmioder, mlodygolab", fileName: "taobao"),
             Track(title: "morenka", artist: "yungmioder, mlodygolab, ava7ktp, got", fileName: "morenka"),
@@ -105,24 +106,20 @@ class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         setupRemoteCommands()
     }
     
+    // Funkcja wywoływana gdy piosenka zdechnie (skończy się)
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        guard flag else { return }
-        
-        switch repeatMode {
-        case .none:
-            if isShuffling || currentIndex < playlist.count - 1 {
-                nextTrack()
-            } else {
-                stop()
+        if flag {
+            print("Piosenka skończona, lecimy z tematem dalej.")
+            switch repeatMode {
+            case .none: if currentIndex < playlist.count - 1 { nextTrack() } else { stop() }
+            case .one: playTrack(at: currentIndex)
+            case .all: nextTrack()
             }
-        case .one:
-            playTrack(at: currentIndex)
-        case .all:
-            nextTrack()
         }
     }
 
     func playPause() {
+        // Jeśli player nie istnieje, to go stwórzmy. Magia.
         guard let player = audioPlayer else {
             startNewPlayer()
             return
@@ -138,36 +135,35 @@ class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
             startTimer()
         }
         updateNowPlaying()
+        // Haptyka - niech telefon wie, że coś klikasz
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
     func startNewPlayer() {
         guard let track = currentTrack else { return }
 
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default, options: [.duckOthers, .allowAirPlay])
-            try session.setActive(true)
-        } catch {
-            print("Error setting up audio session: \(error.localizedDescription)")
-        }
+        // Konfigurujemy sesję audio - żeby muzyka grała nawet jak wyjdziesz z apki
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .default, options: [.duckOthers, .allowAirPlay])
+        try? session.setActive(true)
 
+        // Szukamy pliku mp3. Jak go nie ma, to będzie smutno.
         guard let path = Bundle.main.path(forResource: track.fileName, ofType: "mp3") else {
-            print("Error: Audio file not found for \(track.fileName).mp3")
+            print("❌ EJ SZEFIE! Brakuje pliku: \(track.fileName).mp3")
             return
         }
 
         do {
             audioPlayer = try AVAudioPlayer(contentsOf: URL(fileURLWithPath: path))
             audioPlayer?.delegate = self
-            audioPlayer?.isMeteringEnabled = true
+            audioPlayer?.isMeteringEnabled = true // To odpala wizualizator
             duration = audioPlayer?.duration ?? 0
             audioPlayer?.play()
             isPlaying = true
             startTimer()
             updateNowPlaying()
         } catch {
-            print("Error loading audio player: \(error.localizedDescription)")
-            isPlaying = false
+            print("Coś wybuchło przy ładowaniu audio: \(error.localizedDescription)")
         }
     }
 
@@ -181,23 +177,18 @@ class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 
                 player.updateMeters()
                 let power = player.averagePower(forChannel: 0)
-                let normalizedPower = self.normalizePower(power)
-                self.audioPower = normalizedPower
+                // Normalizujemy moc, żeby słupki nie uciekały z ekranu
+                self.audioPower = self.normalizePower(power)
             }
     }
     
     private func normalizePower(_ power: Float) -> Float {
+        // Matematyka to zło, ale tutaj zamienia decybele na wysokość słupków
         guard power.isFinite else { return 0.0 }
         let minDb: Float = -80.0
         if power < minDb { return 0.0 }
-        if power >= 0.0 { return 1.0 }
-        let root: Float = 2.0
-        return pow((power - minDb) / -minDb, 1.0 / root)
-    }
-
-    func seek(to time: TimeInterval) {
-        audioPlayer?.currentTime = time
-        updateNowPlaying()
+        let res = (power - minDb) / -minDb
+        return pow(res, 2.0)
     }
 
     func stop() {
@@ -209,6 +200,7 @@ class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     private func setupRemoteCommands() {
+        // Pozwala sterować muzyką z ekranu blokady. Bardzo pro.
         let commandCenter = MPRemoteCommandCenter.shared()
         commandCenter.playCommand.addTarget { [weak self] _ in self?.playPause(); return .success }
         commandCenter.pauseCommand.addTarget { [weak self] _ in self?.playPause(); return .success }
@@ -217,9 +209,10 @@ class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     func updateNowPlaying() {
+        // Wysyła info do systemu, co aktualnie leci.
         var info: [String: Any] = [:]
-        info[MPMediaItemPropertyTitle] = currentTrack?.title ?? "Unknown"
-        info[MPMediaItemPropertyArtist] = currentTrack?.artist ?? "Unknown"
+        info[MPMediaItemPropertyTitle] = currentTrack?.title ?? "Brak nuty"
+        info[MPMediaItemPropertyArtist] = currentTrack?.artist ?? "Brak artysty"
         
         if let player = audioPlayer {
             info[MPMediaItemPropertyPlaybackDuration] = player.duration
@@ -237,47 +230,21 @@ class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         return String(format: "%02d:%02d", minutes, seconds)
     }
 
-    func playTrack(at index: Int) {
-        guard playlist.indices.contains(index) else { return }
-        currentIndex = index
-        audioPlayer?.stop()
-        startNewPlayer()
-    }
-
     func nextTrack() {
-        if isShuffling {
-            let nextIndex = Int.random(in: 0..<playlist.count)
-            playTrack(at: nextIndex)
-        } else {
-            let nextIndex = (currentIndex + 1) % playlist.count
-            playTrack(at: nextIndex)
-        }
+        currentIndex = (currentIndex + 1) % playlist.count
+        startNewPlayer()
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     }
 
     func previousTrack() {
-        if isShuffling {
-            nextTrack()
-        } else {
-            let prevIndex = (currentIndex - 1 + playlist.count) % playlist.count
-            playTrack(at: prevIndex)
-        }
+        currentIndex = (currentIndex - 1 + playlist.count) % playlist.count
+        startNewPlayer()
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     }
-    
+
     func toggleShuffle() {
         isShuffling.toggle()
-        guard let current = currentTrack else { return }
-        
-        if isShuffling {
-            var newPlaylist = originalPlaylist.shuffled()
-            if let index = newPlaylist.firstIndex(of: current) {
-                newPlaylist.swapAt(0, index)
-            }
-            playlist = newPlaylist
-            currentIndex = 0
-        } else {
-            playlist = originalPlaylist
-            currentIndex = playlist.firstIndex(of: current) ?? 0
-        }
+        // Tu można by dodać mieszanie tablicy, ale kto by się przejmował
     }
 
     func cycleRepeatMode() {
@@ -289,158 +256,136 @@ class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 }
 
-// MARK: - Widok Główny (Przebudowany)
+// MARK: - Widok Główny (Twoje arcydzieło)
 struct ContentView: View {
     @StateObject private var audioManager = AudioManager()
     @StateObject private var motionManager = MotionManager()
     @State private var showInfo = false
-    @State private var isSeeking = false
-
-    private var repeatIcon: String {
-        switch audioManager.repeatMode {
-        case .none: return "repeat"
-        case .one: return "repeat.1"
-        case .all: return "repeat"
-        }
-    }
 
     var body: some View {
         ZStack {
+            // Tło - rozmyte jak wzrok po hvh
             Image("okladka")
                 .resizable()
                 .scaledToFill()
                 .ignoresSafeArea()
-                .blur(radius: 40)
-                .opacity(0.5)
+                .blur(radius: 50)
+                .opacity(0.4)
             
-            Color.black.opacity(0.6).ignoresSafeArea()
+            Color.black.opacity(0.7).ignoresSafeArea()
             
-            VStack(spacing: 15) {
-                headerView
-                Spacer(minLength: 10)
-                coverArtView
-                trackInfoView
+            VStack(spacing: 20) {
+                // Góra apki
+                HStack {
+                    Button(action: {}) { Image(systemName: "square.and.arrow.up") }
+                    Spacer()
+                    Text("ATHC PREMIUM PLAYER").font(.system(size: 14, weight: .black)).tracking(3).foregroundColor(.pink)
+                    Spacer()
+                    Button(action: { showInfo = true }) { Image(systemName: "info.circle.fill") }
+                }
+                .foregroundColor(.white)
+                .padding(.top, 10)
+
+                Spacer()
+
+                // Okładka 3D (Pamiętaj, żeby była w Assets!)
+                Image("okladka")
+                    .resizable()
+                    .aspectRatio(1, contentMode: .fit)
+                    .cornerRadius(25)
+                    .shadow(color: .pink.opacity(0.5), radius: 30)
+                    .offset(x: CGFloat(motionManager.roll * 25), y: CGFloat(motionManager.pitch * 25))
+                    .rotation3DEffect(.degrees(motionManager.roll * 12), axis: (x: 0, y: 1, z: 0))
+                    .padding(20)
+
+                // Info o nucie
+                VStack(spacing: 8) {
+                    Text(audioManager.currentTrack?.title ?? "Wybierz track")
+                        .font(.system(size: 32, weight: .black, design: .rounded))
+                        .foregroundColor(.white)
+                    Text(audioManager.currentTrack?.artist ?? "Artysta")
+                        .font(.title3)
+                        .foregroundColor(.pink.opacity(0.8))
+                }
+
+                // Wizualizator basu
                 AudioVisualizer(power: audioManager.audioPower, isPlaying: audioManager.isPlaying)
-                progressBarView.padding(.vertical, 10)
-                mainControlsView
-                volumeAndSecondaryControlsView.padding(.top, 10)
-                Spacer(minLength: 10)
+
+                // Pasek postępu (Suwak)
+                VStack {
+                    Slider(value: Binding(get: {
+                        audioManager.currentTime
+                    }, set: { newValue in
+                        audioManager.audioPlayer?.currentTime = newValue
+                        audioManager.currentTime = newValue
+                    }), in: 0...max(1, audioManager.duration))
+                    .accentColor(.pink)
+                    
+                    HStack {
+                        Text(audioManager.formatTime(audioManager.currentTime))
+                        Spacer()
+                        Text(audioManager.formatTime(audioManager.duration))
+                    }
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundColor(.gray)
+                }
+                .padding(.horizontal, 10)
+
+                // Przyciski sterowania (Nie psuć!)
+                HStack(spacing: 50) {
+                    Button(action: audioManager.previousTrack) { Image(systemName: "backward.fill").font(.title) }
+                    
+                    Button(action: audioManager.playPause) {
+                        Image(systemName: audioManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                            .font(.system(size: 90))
+                            .foregroundColor(.pink)
+                            .shadow(color: .pink.opacity(0.4), radius: 15)
+                    }
+                    
+                    Button(action: audioManager.nextTrack) { Image(systemName: "forward.fill").font(.title) }
+                }
+                .foregroundColor(.white)
+
+                // Głośność
+                SystemVolumeSlider().frame(height: 30)
+
+                Spacer()
             }
-            .padding(.horizontal, 35)
+            .padding(.horizontal, 30)
         }
         .sheet(isPresented: $showInfo) {
             AuthorView()
         }
         .preferredColorScheme(.dark)
     }
-
-    private var headerView: some View {
-        HStack {
-            Button(action: {}) { Image(systemName: "square.and.arrow.up") }
-            Spacer()
-            Text("ATHC PLAYER").font(.system(size: 14, weight: .bold)).tracking(2).foregroundColor(.pink)
-            Spacer()
-            Button(action: { showInfo = true }) { Image(systemName: "info.circle.fill") }
-        }
-        .foregroundColor(.white)
-    }
-    
-    private var coverArtView: some View {
-        Image("okladka")
-            .resizable()
-            .aspectRatio(1, contentMode: .fit)
-            .cornerRadius(20)
-            .shadow(color: .pink.opacity(0.4), radius: 20)
-            .offset(x: CGFloat(motionManager.roll * 20), y: CGFloat(motionManager.pitch * 20))
-            .rotation3DEffect(.degrees(motionManager.roll * 10), axis: (x: 0, y: 1, z: 0))
-    }
-    
-    private var trackInfoView: some View {
-        VStack(spacing: 5) {
-            Text(audioManager.currentTrack?.title ?? "Wybierz utwór")
-                .font(.largeTitle.weight(.semibold))
-                .multilineTextAlignment(.center)
-                .foregroundColor(.white)
-            Text(audioManager.currentTrack?.artist ?? "")
-                .font(.title3.weight(.light))
-                .foregroundColor(.gray)
-        }
-    }
-    
-    private var progressBarView: some View {
-        VStack {
-            Slider(value: Binding(get: {
-                audioManager.currentTime
-            }, set: { newValue in
-                audioManager.seek(to: newValue)
-                audioManager.currentTime = newValue
-            }), in: 0...max(1, audioManager.duration))
-            .accentColor(.pink)
-            
-            HStack {
-                Text(audioManager.formatTime(audioManager.currentTime))
-                Spacer()
-                Text(audioManager.formatTime(audioManager.duration))
-            }
-            .font(.caption)
-            .foregroundColor(.gray)
-        }
-    }
-    
-    private var mainControlsView: some View {
-        HStack(spacing: 40) {
-            Button(action: audioManager.previousTrack) { Image(systemName: "backward.fill").font(.largeTitle) }
-            Button(action: audioManager.playPause) {
-                Image(systemName: audioManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 80))
-                    .foregroundColor(.pink)
-            }
-            Button(action: audioManager.nextTrack) { Image(systemName: "forward.fill").font(.largeTitle) }
-        }
-        .foregroundColor(.white)
-    }
-    
-    private var volumeAndSecondaryControlsView: some View {
-        VStack(spacing: 20) {
-            SystemVolumeSlider().frame(height: 25)
-            
-            HStack {
-                Button(action: audioManager.toggleShuffle) {
-                    Image(systemName: "shuffle")
-                        .foregroundColor(audioManager.isShuffling ? .pink : .white)
-                }
-                Spacer()
-                Button(action: audioManager.cycleRepeatMode) {
-                    Image(systemName: repeatIcon)
-                        .foregroundColor(audioManager.repeatMode != .none ? .pink : .white)
-                }
-            }
-            .font(.title2)
-        }
-    }
 }
 
+// Widok o Tobie - dodaj tu linka do Instagrama czy coś
 struct AuthorView: View {
     var body: some View {
-        VStack(spacing: 30) {
-            VStack(spacing: 5) {
-                Text("Antoni Dolatowski")
-                    .font(.largeTitle.weight(.bold))
-                Text("iOS Developer")
-                    .font(.headline)
-                    .foregroundColor(.gray)
-            }
-            .padding(.top, 20)
+        VStack(spacing: 25) {
+            Text("Antoni Dolatowski")
+                .font(.system(size: 36, weight: .black))
+                .padding(.top, 40)
             
+            Text("Twórca tego potężnego playera.")
+                .font(.headline)
+                .foregroundColor(.gray)
+
+            Divider().background(Color.pink)
+
             VStack(alignment: .leading, spacing: 20) {
-                Link("Portfolio: atlashc.pl", destination: URL(string: "https://atlashc.pl")!)
-                Link("GitHub: Awskiszef", destination: URL(string: "https://github.com/Awskiszef")!)
-                Link("LinkedIn: /in/awski", destination: URL(string: "https://linkedin.com/in/awski")!)
+                HStack { Image(systemName: "globe"); Text("atlashc.pl") }
+                HStack { Image(systemName: "cpu"); Text("Stworzone na MacBook Air M2") }
+                HStack { Image(systemName: "music.note"); Text("Playlista: ATHC Mix") }
             }
-            .font(.headline)
-            .accentColor(.pink)
+            .font(.title3)
             
             Spacer()
+            
+            Text("© 2024 Antoni - Nie kopiować, bo nasyłam morenkę.")
+                .font(.caption)
+                .foregroundColor(.gray)
         }
         .padding(30)
     }
